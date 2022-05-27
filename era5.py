@@ -79,4 +79,4 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
 
 
 if __name__ == '__main__':
-    pressure_data('reanalysis', 'temperature', years=[1979, 1991])
+    pressure_data('reanalysis', 'temperature', years=[1979, 2022])
