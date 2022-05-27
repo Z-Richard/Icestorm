@@ -51,7 +51,7 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
     """
     if not os.path.isdir(folder):
         os.makedirs(folder)
-    for year in range(years):
+    for year in range(*years):
         yr_folder = os.path.join(folder, str(year))
         if not os.path.isdir(yr_folder):
             os.makedirs(yr_folder)
