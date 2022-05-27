@@ -51,7 +51,7 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
     """
     if not os.path.isdir(folder):
         os.makedirs(folder)
-    for year in years:
+    for year in range(years):
         yr_folder = os.path.join(folder, str(year))
         if not os.path.isdir(yr_folder):
             os.makedirs(yr_folder)
@@ -79,4 +79,4 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
 
 
 if __name__ == '__main__':
-    pressure_data('reanalysis', 'temperature', years=[1979, 2022])
+    pressure_data('reanalysis', 'temperature', years=[1979, 1994])
