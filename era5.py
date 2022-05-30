@@ -47,6 +47,11 @@ SURFACE_VARIABLES = [
     'total_column_water', 'total_column_water_vapour', 'total_precipitation',
     'vertical_integral_of_eastward_water_vapour_flux', 'vertical_integral_of_northward_water_vapour_flux',
 ]
+VARIABLES = [
+    'divergence', 'geopotential', 'potential_vorticity',
+    'u_component_of_wind', 'v_component_of_wind', 'vertical_velocity',
+    'vorticity',
+]
 
 
 def surface_data(folder, variables=SURFACE_VARIABLES, days=DAYS, time=THREE_HOUR_INTERVAL,
@@ -84,7 +89,7 @@ def surface_data(folder, variables=SURFACE_VARIABLES, days=DAYS, time=THREE_HOUR
                 fp)
 
 
-def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
+def pressure_data(folder, variables, days=DAYS, time=THREE_HOUR_INTERVAL,
                   area=US_SUBSET, pressure_levels=PRES_LEVELS,
                   grid=NATIVE_GRID, years=[1979, 2022]):
     """
@@ -100,7 +105,10 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
             os.makedirs(yr_folder)
         for month in [11, 12, 1, 2, 3]:
             yr = year if month in [11, 12] else year + 1
-            fn = f'e5_{yr}{month:02d}_pl_{variable}.nc'
+            if type(variables) == str:
+                fn = f'e5_{yr}{month:02d}_pl_{variables}.nc'
+            else:
+                fn = f'e5_{yr}{month:02d}_pl.nc'
             fp = os.path.join(yr_folder, fn)
             print('=========================================================')
             print(f'Downloading {yr}-{month:02d}')
@@ -109,7 +117,7 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
                 {
                     'product_type': 'reanalysis',
                     'format': 'netcdf',
-                    'variable': variable,
+                    'variable': variables,
                     'pressure_level': pressure_levels,
                     'year': f'{yr}',
                     'month': f'{month:02d}',
@@ -122,5 +130,7 @@ def pressure_data(folder, variable, days=DAYS, time=THREE_HOUR_INTERVAL,
 
 
 if __name__ == '__main__':
-    surface_data('reanalysis', years=[2012, 2013])
+    # surface_data('reanalysis', years=[2012, 2013])
+    pressure_data('reanalysis', variables=VARIABLES,
+                  pressure_levels=[925, 850, 700, 500])
     # pressure_data('reanalysis', 'temperature', years=[1979, 1994])
