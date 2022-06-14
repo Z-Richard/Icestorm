@@ -9,8 +9,9 @@ import os
 c = cdsapi.Client()
 
 
-PRES_LEVELS = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700]
-US_SUBSET = [65, -140, 20, -55]
+PRES_LEVELS = [1000, 975, 950, 925, 900, 875,
+               850, 825, 800, 775, 750, 700, 500, 250]
+US_SUBSET = [65, -145, 10, -40]
 DAYS = [
     '01', '02', '03',
     '04', '05', '06',
@@ -130,7 +131,7 @@ def pressure_data(folder, variables, days=DAYS, time=THREE_HOUR_INTERVAL,
 
 
 if __name__ == '__main__':
-    # surface_data('reanalysis', years=[2012, 2013])
+    surface_data('reanalysis', years=[1979, 2022])
     pressure_data('reanalysis', variables=VARIABLES,
-                  pressure_levels=[925, 850, 700, 500])
-    # pressure_data('reanalysis', 'temperature', years=[1979, 1994])
+                  pressure_levels=[925, 850, 700, 500, 250])
+    pressure_data('reanalysis', 'temperature', years=[1979, 2022])
