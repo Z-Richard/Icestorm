@@ -104,7 +104,7 @@ def pressure_data(folder, variables, days=DAYS, time=THREE_HOUR_INTERVAL,
         if not os.path.isdir(yr_folder):
             os.makedirs(yr_folder)
         for month in [10, 11, 12, 1, 2, 3, 4]:
-            yr = year if month in [11, 12] else year + 1
+            yr = year if month in [10, 11, 12] else year + 1
             if type(variables) == str:
                 fn = f'e5_{yr}{month:02d}_pl_{variables}.nc'
             else:
