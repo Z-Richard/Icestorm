@@ -352,7 +352,7 @@ def define_ld_events(folder):
     stations = pd.read_csv('stations.csv').set_index('station')
     all_min_zr = min_zr_stations(1979, 2022)
 
-    for file in filepaths[28:29]:
+    for file in filepaths:
         df = pd.read_csv(file)
         year = file.split('.')[0].split('\\')[-1]
         print(f'Processing year: {year}')
