@@ -23,6 +23,8 @@ MAX_ATTEMPTS = 6
 # HTTPS here can be problematic for installs that don't have Lets Encrypt CA
 SERVICE = "http://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?"
 
+METAR_DIR = os.path.join('METAR')
+
 
 def download_data(uri):
     """Fetch the data from the IEM
@@ -60,11 +62,16 @@ def get_stations_from_networks():
     stations = {}
     states = """AL AR CT DE FL GA IA IL IN KS KY LA MA MD ME
      MI MN MO MS NC ND NE NH NJ NY OH OK PA RI SC SD TN TX VA VT
-     WI WV """
+     WI WV"""
+
+    CA_states = """QC ON NB NF NS PE MB"""
     # IEM quirk to have Iowa AWOS sites in its own labeled network
     networks = []
     for state in states.split():
         networks.append("%s_ASOS" % (state,))
+
+    for province in CA_states.split():
+        networks.append(f'CA_{province}_ASOS')
 
     for network in networks:
         # Get metadata
@@ -91,12 +98,12 @@ def get_stations_for_one_year(stations, yr):
         - None
     """
     # timestamps in UTC to request data for
-    os.chdir('METAR')
+    yr_dir = os.path.join(METAR_DIR, str(yr))
+    if not os.path.isdir(yr_dir):
+        os.makedirs(yr_dir)
 
-    os.makedirs(str(yr), exist_ok=True)
-    os.chdir(str(yr))
-    startts = datetime.datetime(yr, 11, 1)
-    endts = datetime.datetime(yr + 1, 3, 31)
+    startts = datetime.datetime(yr, 10, 1)
+    endts = datetime.datetime(yr + 1, 4, 30)
 
     service = SERVICE + "data=wxcodes&tz=Etc/UTC&format=comma&latlon=no&"
 
@@ -114,7 +121,8 @@ def get_stations_for_one_year(stations, yr):
             startts.strftime("%Y%m%d%H%M"),
             endts.strftime("%Y%m%d%H%M"),
         )
-        out = open(outfn, "w")
+        fp = os.path.join(yr_dir, outfn)
+        out = open(fp, "w")
         out.write(data)
         out.close()
 
@@ -123,4 +131,3 @@ if __name__ == '__main__':
     stations = get_stations_from_networks().index.tolist()
     for year in range(1979, 2022):
         get_stations_for_one_year(stations, year)
-        os.chdir("..")

@@ -1,16 +1,24 @@
 """
 Author: Richard Zhuang (hz542)
-Time: May 25, 2022
+Time: June 14, 2022
 """
 
 import numpy as np
 import pandas as pd
-import datetime
+
+import os
 from glob import glob
+
+import matplotlib.pyplot as plt
+
+import datetime
+
+from sklearn.neighbors import KernelDensity
+from sklearn.cluster import KMeans
+from scipy.signal import argrelextrema
 from scipy.spatial.distance import cdist
 from geopy.distance import distance as geodist
-import os
-import matplotlib.pyplot as plt
+
 from scrape import get_stations_from_networks
 
 # An incomplete list of METAR code
@@ -39,6 +47,8 @@ PRECIP = ['-DZ', 'DZ', '+DZ', '-FZDZ', 'FZDZ', '+FZDZ', '-DZRA', 'DZRA',
 
 EARTH_RADIUS = 6371
 MIN_LD_STATIONS = 6
+
+ERR_STATIONS = {'CBK', 'GLD', 'SYF'}
 
 
 def timedelta_to_hrs(td: pd.Timedelta, process_series=True):
@@ -204,6 +214,134 @@ def to_all_ld(folder):
                    date_format='%Y-%m-%d %H:%M')
 
 
+def _return_dist_mat(event):
+    """
+    A helper function to return the distance matrix of a DataFrame. 
+    """
+    latitude = event['lat'].tolist()
+    longitude = event['lon'].tolist()
+    coords = list(zip(latitude, longitude))
+    return cdist(
+        coords, coords, lambda lat, lon: geodist(lat, lon).kilometers)
+
+
+def _write_event_to_file(event, yr_folder):
+    """
+    Write a single event to the file. 
+    """
+    print('_write_event_to_file\n', event)
+    fmt = '%Y%m%d%H%M'
+    fn = event.iloc[0].loc['start_time'].strftime(
+        fmt) + '_' + event.iloc[-1].loc['start_time'].strftime(fmt) + '.csv'
+    fp = os.path.join(yr_folder, fn)
+    event.to_csv(fp, index=False, date_format='%Y-%m-%d %H:%M')
+
+
+def _define_event(event: pd.DataFrame, min_zr, yr_folder):
+    """
+    Utility function to define an individual LD event.
+
+    TODO: Break this function into smaller pieces so that 
+    it is more manageable.  
+    """
+    print('_define_event\n', event)
+    event = event.reset_index(drop=True)
+    points = event.index.tolist()
+    stations = set(event['station'].tolist())
+
+    # Code to exclude any outliers spatially
+    if (ERR_STATIONS.issubset(stations) and
+            len(stations) < len(ERR_STATIONS) + min_zr) or (len(event) < min_zr):
+        return
+
+    dist_mat = _return_dist_mat(event)
+
+    # We need the point to be close to at least a few other points,
+    # excluding itself
+    for i, row in enumerate(dist_mat):
+        mask_row = row < 1000
+        if sum(mask_row) <= min_zr:
+            points.remove(i)
+
+    if len(points) < min_zr:
+        return
+
+    event = event.loc[points, :].copy().reset_index(drop=True)
+    start_time = event.loc[0, 'start_time']
+    end_time = event.loc[len(event) - 1, 'start_time']
+    timespan = timedelta_to_hrs(end_time - start_time, process_series=False)
+    time_diff = timedelta_to_hrs(event['start_time'] - start_time).to_numpy()
+
+    dist_mat = _return_dist_mat(event)
+
+    # This is our proceed-as-usual case. Do nothing to break the events up.
+    if timespan < 24:
+        _write_event_to_file(event, yr_folder)
+    # Kernel Density method
+    elif 24 <= timespan < 48:
+        kde = KernelDensity(kernel='gaussian',
+                            bandwidth=timespan / 24).fit(time_diff.reshape(-1, 1))
+        # a list of values to compute the density
+        s = np.linspace(-10, timespan+10)
+        e = kde.score_samples(s.reshape(-1, 1))  # the actual density
+        maxima = argrelextrema(e, np.greater)[0]  # a list of maxima indices
+
+        peaks = [kde.score_samples(s[ma].reshape(-1, 1)) for ma in maxima]
+        mi = np.argmax(peaks)
+        peak_time = datetime.timedelta(hours=s[maxima[mi]]) + start_time
+        peak_time_diff = abs(timedelta_to_hrs(event['start_time'] - peak_time))
+        event = event.loc[peak_time_diff < 12, :]
+
+        # Write the event to a file
+        _write_event_to_file(event, yr_folder)
+    elif timespan >= 48:
+        n_clusters = 2
+
+        # The input to the K-means object will be an array of shape
+        # (m, 3), where m is the number of stations in an event, and the three
+        # features are latitude, longitude, and time, respectively.
+        X = np.array([event['lat'], event['lon'], time_diff]).transpose()
+        kmeans = KMeans(n_clusters=n_clusters).fit(X)
+        centroids, sub_events = [], []
+
+        for label in range(n_clusters):
+            print(kmeans.labels_)
+            subset_mask = kmeans.labels_ == label
+
+            # Note here that the sub_event should be sorted by time already
+            sub_event = event.loc[subset_mask, :].copy().reset_index(drop=True)
+
+            # We need to compute a few metrics about this sub-event.
+            # For example, how many data points are there? Do the data points
+            # really form a cluster? What is the maximum pairwise distance
+            # within a single cluster? What is the timespan of this sub-event?
+            sub_start_time = sub_event.loc[0, 'start_time']
+            sub_end_time = sub_event.loc[len(sub_event) - 1, 'start_time']
+            sub_timespan = timedelta_to_hrs(
+                sub_end_time - sub_start_time, process_series=False)
+
+            # Exclude the events with fewer than the specified data point
+            if sub_timespan < 12 or len(sub_event) < min_zr:
+                continue
+            elif 12 <= sub_timespan < 24:
+                centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
+                centroids.append(centroid)
+                sub_events.append(sub_event)
+            elif sub_timespan >= 24:
+                centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
+                centroids.append(centroid)
+                centroid_time_diff = abs(timedelta_to_hrs(
+                    sub_event['start_time'] - centroid))
+                sub_event = sub_event.loc[centroid_time_diff < 12, :]
+                if len(sub_event) < min_zr:
+                    continue
+                else:
+                    sub_events.append(sub_event)
+
+        for se in sub_events:
+            _write_event_to_file(se, yr_folder)
+
+
 def define_ld_events(folder):
     """
     Define the long-duration ZR events from 1979 to 2022.
@@ -213,7 +351,8 @@ def define_ld_events(folder):
     filepaths = glob(os.path.join('LD_SD_all', '*.csv'))
     stations = pd.read_csv('stations.csv').set_index('station')
     all_min_zr = min_zr_stations(1979, 2022)
-    for file in filepaths:
+
+    for file in filepaths[28:29]:
         df = pd.read_csv(file)
         year = file.split('.')[0].split('\\')[-1]
         print(f'Processing year: {year}')
@@ -241,18 +380,7 @@ def define_ld_events(folder):
         ei = ei + [indices[-1]]
         for s, e in list(zip(si, ei)):
             event = df_ld.loc[s:e, :].copy()
-            if len(event) < min_zr:
-                continue
-            # df_event = df_sd.loc[s:e, :].copy()
-            # df_75 = df_event[df_event['zr_hours'] >= 4.]
-            # df_event = pd.concat([df_75, event])
-            # df_event = df_event.sort_values(by='start_time')
-            # df_event.reset_index(drop=True, inplace=True)
-            fmt = '%Y%m%d%H%M'
-            fn = df_ld.loc[s, 'start_time'].strftime(
-                fmt) + '_' + df_ld.loc[e, 'start_time'].strftime(fmt) + '.csv'
-            fp = os.path.join(yr_folder, fn)
-            event.to_csv(fp, index=False, date_format='%Y-%m-%d %H:%M')
+            _define_event(event, min_zr, yr_folder)
 
 
 def plot_stations_by_year(start_yr, end_yr):
@@ -291,18 +419,4 @@ def num_of_events(folder):
 
 
 if __name__ == '__main__':
-    # define_ld_events('Events')
-    print(num_of_events('Events'))
-
-    # for s, e in list(zip(si, ei))[:5]:
-    #     length = e - s + 1
-    #     event = dfs_merge.loc[s:e, :].copy()
-    #     latitude = event['lat'].tolist()
-    #     longitude = event['lon'].tolist()
-    #     coords = list(zip(latitude, longitude))
-    #     dist_mat = cdist(
-    #         coords, coords, lambda lat, lon: geodist(lat, lon).kilometers)
-    #     print(dist_mat)
-
-    # print(len(si))
-    # print(tuple(zip(si, ei)))
+    define_ld_events('Events')
