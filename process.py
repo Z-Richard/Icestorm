@@ -304,8 +304,8 @@ def _define_event(event: pd.DataFrame, min_zr, yr_folder):
         kmeans = KMeans(n_clusters=n_clusters).fit(X)
         centroids, sub_events = [], []
 
+        # Iterate through each possible cluster
         for label in range(n_clusters):
-            print(kmeans.labels_)
             subset_mask = kmeans.labels_ == label
 
             # Note here that the sub_event should be sorted by time already
@@ -321,22 +321,21 @@ def _define_event(event: pd.DataFrame, min_zr, yr_folder):
                 sub_end_time - sub_start_time, process_series=False)
 
             # Exclude the events with fewer than the specified data point
-            if sub_timespan < 12 or len(sub_event) < min_zr:
+            if sub_timespan < 12:
                 continue
             elif 12 <= sub_timespan < 24:
                 centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
-                centroids.append(centroid)
-                sub_events.append(sub_event)
             elif sub_timespan >= 24:
                 centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
-                centroids.append(centroid)
                 centroid_time_diff = abs(timedelta_to_hrs(
                     sub_event['start_time'] - centroid))
                 sub_event = sub_event.loc[centroid_time_diff < 12, :]
-                if len(sub_event) < min_zr:
-                    continue
-                else:
-                    sub_events.append(sub_event)
+
+            if len(sub_event) < min_zr:
+                continue
+            else:
+                centroids.append(centroid)
+                sub_events.append(sub_event)
 
         for se in sub_events:
             _write_event_to_file(se, yr_folder)
@@ -419,4 +418,4 @@ def num_of_events(folder):
 
 
 if __name__ == '__main__':
-    define_ld_events('Events')
+    define_ld_events('Events_062022')
