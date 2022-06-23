@@ -311,7 +311,28 @@ def _kde_event(event, timespan, time_diff, start_time):
 
 def _kmeans_event(event, time_diff, min_zr, yr_folder):
     """
-    Use K-Means to break events into small segments.
+    Use K-Means to break events into small segments and write the events
+    to the corresponding files. 
+
+    Parameters
+    ----------
+    event : pd.DataFrame
+        The actual event
+
+    time_diff : numpy.ndarray
+        An array that specifies the time difference between the starting time 
+        of all data points of an event and the first data point
+
+    min_zr : int
+        The minimum number of freezing rain events required for a specified
+        year
+
+    yr_folder: str
+        The folder to write the file to
+
+    Returns
+    -------
+    None
     """
     n_clusters = 2
 
@@ -349,12 +370,25 @@ def _kmeans_event(event, time_diff, min_zr, yr_folder):
         _write_event_to_file(se, min_zr, yr_folder)
 
 
-def _define_event(event: pd.DataFrame, min_zr, yr_folder):
+def _define_event(event, min_zr, yr_folder):
     """
-    Utility function to define an individual LD event.
+    Utility function to define an individual LD event. 
 
-    TODO: Break this function into smaller pieces so that 
-    it is more manageable.  
+    Parameters
+    ----------
+    event : pd.DataFrame
+        The actual event
+
+    min_zr : int
+        The minimum number of freezing rain events required for a specified
+        year
+
+    yr_folder: str
+        The folder to write the file to
+
+    Returns
+    -------
+    None
     """
     event = event.dropna().reset_index(drop=True)
     stations = set(event['station'].tolist())
@@ -378,8 +412,10 @@ def _define_event(event: pd.DataFrame, min_zr, yr_folder):
             points.remove(i)
 
     event = event.loc[points, :].copy().reset_index(drop=True)
+
     if len(event) == 0:
         return
+
     start_time = event.loc[0, 'start_time']
     end_time = event.loc[len(event) - 1, 'start_time']
     timespan = timedelta_to_hrs(end_time - start_time, process_series=False)
