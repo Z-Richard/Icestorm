@@ -46,7 +46,8 @@ PRECIP = ['-DZ', 'DZ', '+DZ', '-FZDZ', 'FZDZ', '+FZDZ', '-DZRA', 'DZRA',
           'SHSN', '+SHSN', '-GR', 'GR', 'TSRA', 'TSGR', '+TSRA']
 
 EARTH_RADIUS = 6371
-MIN_LD_STATIONS = 6
+MIN_LD_STATIONS = 8
+MIN_EVENT_DISTANCE = 150
 
 ERR_STATIONS = {'CBK', 'GLD', 'SYF'}
 
@@ -145,11 +146,10 @@ def make_yr_dir(folder: str, start_yr: int, end_yr: int):
     """
     if not os.path.isdir(folder):
         os.makedirs(folder)
-    os.chdir(folder)
     for year in range(start_yr, end_yr):
         if not os.path.isdir(str(year)):
-            os.makedirs(str(year))
-    # os.chdir('..')
+            fp = os.path.join(folder, str(year))
+            os.makedirs(fp)
 
 
 def all_ld_events(start_yr, end_yr):
@@ -193,10 +193,9 @@ def to_all_ld(folder):
     """
     if not os.path.isdir(folder):
         os.makedirs(folder)
-    os.chdir(folder)
     for year in range(1979, 2022):
-        print(year)
-        filepaths = glob(os.path.join('..', 'LD_SD', str(year), '*.csv'))
+        print(f'Processing: {year}')
+        filepaths = glob(os.path.join('LD_SD', str(year), '*.csv'))
         dfs = []
         for file in filepaths:
             df = pd.read_csv(file)
@@ -210,13 +209,23 @@ def to_all_ld(folder):
         duration = dfs['end_time'] - dfs['start_time']
         dfs['duration'] = timedelta_to_hrs(duration)
         dfs = dfs.sort_values(by='start_time')
-        dfs.to_csv(str(year) + '.csv', index=False,
+        fp = os.path.join(folder, f'{year}.csv')
+        dfs.to_csv(fp, index=False,
                    date_format='%Y-%m-%d %H:%M')
 
 
 def _return_dist_mat(event):
     """
-    A helper function to return the distance matrix of a DataFrame. 
+    Returns the distance matrix of a DataFrame.
+
+    Parameters
+    ----------
+    event : pd.DataFrame
+        The actual event
+
+    Returns
+    -------
+    `numpy.ndarray`, the distance matrix of shape len(event) * len(event)
     """
     latitude = event['lat'].tolist()
     longitude = event['lon'].tolist()
@@ -225,16 +234,121 @@ def _return_dist_mat(event):
         coords, coords, lambda lat, lon: geodist(lat, lon).kilometers)
 
 
-def _write_event_to_file(event, yr_folder):
+def _write_event_to_file(event, min_zr, yr_folder):
     """
-    Write a single event to the file. 
+    Writes a single event to file. 
+
+    Parameters
+    ----------
+    event : pd.DataFrame
+        The actual event
+
+    min_zr : int
+        The minimum number of freezing rain events required for a specified
+        year
+
+    yr_folder: str
+        The folder to write the file to
+
+    Returns
+    -------
+    None
     """
     print('_write_event_to_file\n', event)
     fmt = '%Y%m%d%H%M'
+
     fn = event.iloc[0].loc['start_time'].strftime(
         fmt) + '_' + event.iloc[-1].loc['start_time'].strftime(fmt) + '.csv'
     fp = os.path.join(yr_folder, fn)
-    event.to_csv(fp, index=False, date_format='%Y-%m-%d %H:%M')
+
+    dist_mat = _return_dist_mat(event)
+    max_dist = np.max(dist_mat)
+
+    if max_dist / len(event) < MIN_EVENT_DISTANCE and len(event) >= min_zr:
+        event.to_csv(fp, index=False, date_format='%Y-%m-%d %H:%M')
+
+
+def _kde_event(event, timespan, time_diff, start_time):
+    """
+    Use KDE to find the most active 24-hour period of a long-duration
+    ZR event. 
+
+    Parameters
+    ----------
+    event : pd.DataFrame
+        The actual event
+
+    timespan : int
+        The timespan of the event, calculated from subtracting the starting time
+        of the first point from the starting time of the last point
+
+    time_diff : numpy.ndarray
+        An array that specifies the time difference between the starting time 
+        of all data points of an event and the first data point
+
+    start_time : TODO
+
+    Returns
+    -------
+    The modified event that spans no longer than 24 hours. 
+    """
+    kde = KernelDensity(kernel='gaussian',
+                        bandwidth=timespan / 24).fit(time_diff.reshape(-1, 1))
+
+    # a list of values to compute the density
+    s = np.linspace(-10, timespan+10)
+    e = kde.score_samples(s.reshape(-1, 1))  # the actual density
+    maxima = argrelextrema(e, np.greater)[0]  # a list of maxima indices
+
+    peaks = [kde.score_samples(s[ma].reshape(-1, 1)) for ma in maxima]
+    mi = np.argmax(peaks)
+    peak_time = datetime.timedelta(hours=s[maxima[mi]]) + start_time
+    peak_time_diff = abs(timedelta_to_hrs(event['start_time'] - peak_time))
+
+    event = event.loc[peak_time_diff < 12, :].copy()
+    return event
+
+
+def _kmeans_event(event, time_diff, min_zr, yr_folder):
+    """
+    Use K-Means to break events into small segments.
+    """
+    n_clusters = 2
+
+    X = np.array([event['lat'], event['lon'], time_diff]).transpose()
+    kmeans = KMeans(n_clusters=n_clusters).fit(X)
+    centroids, sub_events = [], []
+
+    # Iterate through each possible cluster
+    for label in range(n_clusters):
+        subset_mask = kmeans.labels_ == label
+
+        # Note here that the sub_event should be sorted by time already
+        sub_event = event.loc[subset_mask, :].copy().reset_index(drop=True)
+        print('sub_event\n', sub_event)
+
+        sub_start_time = sub_event.loc[0, 'start_time']
+        sub_end_time = sub_event.loc[len(sub_event) - 1, 'start_time']
+        sub_timespan = timedelta_to_hrs(
+            sub_end_time - sub_start_time, process_series=False)
+
+        centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
+
+        # Exclude the events with fewer than the specified data point
+        if sub_timespan > 24:
+            sub_time_diff = timedelta_to_hrs(
+                sub_event['start_time'] - sub_start_time)
+            sub_event = _kde_event(sub_event, sub_timespan, sub_time_diff.to_numpy(),
+                                   sub_start_time)
+            print('sub_event_after_kde\n', sub_event)
+            sub_event = sub_event.reset_index(drop=True)
+            centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
+
+        centroids.append(centroid)
+        sub_events.append(sub_event)
+
+    for se in sub_events:
+        _write_event_to_file(se, min_zr, yr_folder)
 
 
 def _define_event(event: pd.DataFrame, min_zr, yr_folder):
@@ -244,8 +358,7 @@ def _define_event(event: pd.DataFrame, min_zr, yr_folder):
     TODO: Break this function into smaller pieces so that 
     it is more manageable.  
     """
-    print('_define_event\n', event)
-    event = event.reset_index(drop=True)
+    event = event.dropna().reset_index(drop=True)
     points = event.index.tolist()
     stations = set(event['station'].tolist())
 
@@ -263,82 +376,23 @@ def _define_event(event: pd.DataFrame, min_zr, yr_folder):
         if sum(mask_row) <= min_zr:
             points.remove(i)
 
-    if len(points) < min_zr:
-        return
-
     event = event.loc[points, :].copy().reset_index(drop=True)
+    if len(event) == 0:
+        return
     start_time = event.loc[0, 'start_time']
     end_time = event.loc[len(event) - 1, 'start_time']
     timespan = timedelta_to_hrs(end_time - start_time, process_series=False)
     time_diff = timedelta_to_hrs(event['start_time'] - start_time).to_numpy()
 
-    dist_mat = _return_dist_mat(event)
-
     # This is our proceed-as-usual case. Do nothing to break the events up.
     if timespan < 24:
-        _write_event_to_file(event, yr_folder)
+        _write_event_to_file(event, min_zr, yr_folder)
     # Kernel Density method
     elif 24 <= timespan < 48:
-        kde = KernelDensity(kernel='gaussian',
-                            bandwidth=timespan / 24).fit(time_diff.reshape(-1, 1))
-        # a list of values to compute the density
-        s = np.linspace(-10, timespan+10)
-        e = kde.score_samples(s.reshape(-1, 1))  # the actual density
-        maxima = argrelextrema(e, np.greater)[0]  # a list of maxima indices
-
-        peaks = [kde.score_samples(s[ma].reshape(-1, 1)) for ma in maxima]
-        mi = np.argmax(peaks)
-        peak_time = datetime.timedelta(hours=s[maxima[mi]]) + start_time
-        peak_time_diff = abs(timedelta_to_hrs(event['start_time'] - peak_time))
-        event = event.loc[peak_time_diff < 12, :]
-
-        # Write the event to a file
-        _write_event_to_file(event, yr_folder)
+        event = _kde_event(event, timespan, time_diff, start_time)
+        _write_event_to_file(event, min_zr, yr_folder)
     elif timespan >= 48:
-        n_clusters = 2
-
-        # The input to the K-means object will be an array of shape
-        # (m, 3), where m is the number of stations in an event, and the three
-        # features are latitude, longitude, and time, respectively.
-        X = np.array([event['lat'], event['lon'], time_diff]).transpose()
-        kmeans = KMeans(n_clusters=n_clusters).fit(X)
-        centroids, sub_events = [], []
-
-        # Iterate through each possible cluster
-        for label in range(n_clusters):
-            subset_mask = kmeans.labels_ == label
-
-            # Note here that the sub_event should be sorted by time already
-            sub_event = event.loc[subset_mask, :].copy().reset_index(drop=True)
-
-            # We need to compute a few metrics about this sub-event.
-            # For example, how many data points are there? Do the data points
-            # really form a cluster? What is the maximum pairwise distance
-            # within a single cluster? What is the timespan of this sub-event?
-            sub_start_time = sub_event.loc[0, 'start_time']
-            sub_end_time = sub_event.loc[len(sub_event) - 1, 'start_time']
-            sub_timespan = timedelta_to_hrs(
-                sub_end_time - sub_start_time, process_series=False)
-
-            # Exclude the events with fewer than the specified data point
-            if sub_timespan < 12:
-                continue
-            elif 12 <= sub_timespan < 24:
-                centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
-            elif sub_timespan >= 24:
-                centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
-                centroid_time_diff = abs(timedelta_to_hrs(
-                    sub_event['start_time'] - centroid))
-                sub_event = sub_event.loc[centroid_time_diff < 12, :]
-
-            if len(sub_event) < min_zr:
-                continue
-            else:
-                centroids.append(centroid)
-                sub_events.append(sub_event)
-
-        for se in sub_events:
-            _write_event_to_file(se, yr_folder)
+        _kmeans_event(event, time_diff, min_zr, yr_folder)
 
 
 def define_ld_events(folder):
@@ -418,4 +472,8 @@ def num_of_events(folder):
 
 
 if __name__ == '__main__':
+    # stations_to_file('stations.csv')
+    # all_ld_events(1979, 2022)
+    # to_all_ld('LD_SD_all')
     define_ld_events('Events_062022')
+    # print(num_of_events('Events_062022'))
