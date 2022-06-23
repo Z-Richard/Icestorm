@@ -48,6 +48,7 @@ PRECIP = ['-DZ', 'DZ', '+DZ', '-FZDZ', 'FZDZ', '+FZDZ', '-DZRA', 'DZRA',
 EARTH_RADIUS = 6371
 MIN_LD_STATIONS = 8
 MIN_EVENT_DISTANCE = 150
+OUTLIER_DISTANCE = 1000
 
 ERR_STATIONS = {'CBK', 'GLD', 'SYF'}
 
@@ -407,7 +408,7 @@ def _define_event(event, min_zr, yr_folder):
     # We need the point to be close to at least a few other points,
     # excluding itself
     for i, row in enumerate(dist_mat):
-        mask_row = row < 1000
+        mask_row = row < OUTLIER_DISTANCE
         if sum(mask_row) <= min_zr:
             points.remove(i)
 
