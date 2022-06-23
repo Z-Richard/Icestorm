@@ -6,6 +6,8 @@ Time: June 14, 2022
 import numpy as np
 import pandas as pd
 
+from statistics import median
+
 import os
 from glob import glob
 
@@ -55,6 +57,7 @@ ERR_STATIONS = {'CBK', 'GLD', 'SYF'}
 
 def timedelta_to_hrs(td: pd.Timedelta, process_series=True):
     """
+    Convert a timedelta object to the number of hours elapsed. 
     """
     if process_series:
         return np.round(td.dt.components.hours +
@@ -62,6 +65,29 @@ def timedelta_to_hrs(td: pd.Timedelta, process_series=True):
     else:
         return np.round(td.components.hours +
                         td.components.minutes / 60 + td.components.days * 24, 2)
+
+
+def _find_event_median_time(event):
+    """
+    Find the median starting time of an event.
+
+    Parameters
+    ----------
+    event : Pd.DataFrame
+        The actual event. 
+        Invariant: the time column of the event should already be converted
+        to a datetime series and be named as 'start_time'. The event should
+        also be sorted by the starting time. 
+
+    Returns
+    -------
+    `datetime`
+        The median starting time of an event. 
+    """
+    start_time = event.loc[0, 'start_time']
+    time_diff = timedelta_to_hrs(event['start_time'] - start_time).tolist()
+    median_time_diff = median(time_diff)
+    return start_time + datetime.timedelta(hours=median_time_diff)
 
 
 def is_ldzr(filename):
@@ -353,7 +379,7 @@ def _kmeans_event(event, time_diff, min_zr, yr_folder):
         sub_timespan = timedelta_to_hrs(
             sub_end_time - sub_start_time, process_series=False)
 
-        centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
+        centroid = _find_event_median_time(sub_event)
 
         # Exclude the events with fewer than the specified data point
         if sub_timespan > 24:
@@ -362,7 +388,7 @@ def _kmeans_event(event, time_diff, min_zr, yr_folder):
             sub_event = _kde_event(sub_event, sub_timespan, sub_time_diff.to_numpy(),
                                    sub_start_time)
             sub_event = sub_event.reset_index(drop=True)
-            centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
+            centroid = _find_event_median_time(sub_event)
 
         centroids.append(centroid)
         sub_events.append(sub_event)
