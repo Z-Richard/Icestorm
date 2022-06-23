@@ -325,7 +325,6 @@ def _kmeans_event(event, time_diff, min_zr, yr_folder):
 
         # Note here that the sub_event should be sorted by time already
         sub_event = event.loc[subset_mask, :].copy().reset_index(drop=True)
-        print('sub_event\n', sub_event)
 
         sub_start_time = sub_event.loc[0, 'start_time']
         sub_end_time = sub_event.loc[len(sub_event) - 1, 'start_time']
@@ -340,7 +339,6 @@ def _kmeans_event(event, time_diff, min_zr, yr_folder):
                 sub_event['start_time'] - sub_start_time)
             sub_event = _kde_event(sub_event, sub_timespan, sub_time_diff.to_numpy(),
                                    sub_start_time)
-            print('sub_event_after_kde\n', sub_event)
             sub_event = sub_event.reset_index(drop=True)
             centroid = sub_event.loc[len(sub_event) // 2, 'start_time']
 
@@ -359,14 +357,17 @@ def _define_event(event: pd.DataFrame, min_zr, yr_folder):
     it is more manageable.  
     """
     event = event.dropna().reset_index(drop=True)
-    points = event.index.tolist()
     stations = set(event['station'].tolist())
 
     # Code to exclude any outliers spatially
-    if (ERR_STATIONS.issubset(stations) and
-            len(stations) < len(ERR_STATIONS) + min_zr) or (len(event) < min_zr):
+    if (ERR_STATIONS.issubset(stations)):
+        event = event.loc[~event['station'].isin(
+            ERR_STATIONS), :].copy().reset_index(drop=True)
+
+    if len(stations) < min_zr:
         return
 
+    points = event.index.tolist()
     dist_mat = _return_dist_mat(event)
 
     # We need the point to be close to at least a few other points,
@@ -433,6 +434,7 @@ def define_ld_events(folder):
         ei = ei + [indices[-1]]
         for s, e in list(zip(si, ei)):
             event = df_ld.loc[s:e, :].copy()
+            print('event\n', event)
             _define_event(event, min_zr, yr_folder)
 
 
@@ -476,4 +478,4 @@ if __name__ == '__main__':
     # all_ld_events(1979, 2022)
     # to_all_ld('LD_SD_all')
     define_ld_events('Events_062022')
-    # print(num_of_events('Events_062022'))
+    print(num_of_events('Events_062022'))
