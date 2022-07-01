@@ -228,6 +228,7 @@ def pressure_data(folder, variables, days=DAYS, time=THREE_HOUR_INTERVAL,
 
 if __name__ == '__main__':
     # download_era5('reanalysis', years=[1980, 1981])
-    pressure_data('reanalysis', variables=VARIABLES,
-                  pressure_levels=[925, 850, 700, 500], years=[2004, 2022])
-    pressure_data('reanalysis', 'temperature', years=[1979, 2022])
+    # surface_data('reanalysis', years=[1979, 2022])
+    # pressure_data('reanalysis', variables=VARIABLES,
+    #              pressure_levels=[925, 850, 700, 500], years=[1979, 2022])
+    pressure_data('reanalysis', 'temperature', years=[1983, 2022])
