@@ -136,7 +136,7 @@ def is_ldzr(filename):
 
     for si, ei in zip(start_index, end_index):
         sseq, eseq = df_zr.loc[si, 'seq'], df_zr.loc[ei-1, 'seq']
-        all_record = df.loc[sseq:eseq, :].copy()
+        all_record = df.loc[sseq:eseq+1, :].copy()
         all_record['duration'] = pd.to_timedelta(all_record['time'].diff())
         all_record['duration'] = all_record['duration'].shift(-1)
         total_zr = all_record.loc[all_record['wxcodes'].str.contains(
@@ -174,8 +174,8 @@ def make_yr_dir(folder: str, start_yr: int, end_yr: int):
     if not os.path.isdir(folder):
         os.makedirs(folder)
     for year in range(start_yr, end_yr):
-        if not os.path.isdir(str(year)):
-            fp = os.path.join(folder, str(year))
+        fp = os.path.join(folder, str(year))
+        if not os.path.isdir(fp):
             os.makedirs(fp)
 
 
@@ -187,14 +187,15 @@ def all_ld_events(start_yr, end_yr):
     """
     make_yr_dir('LD_SD', start_yr, end_yr)
     for year in range(start_yr, end_yr):
-        filepaths = glob(os.path.join('..', 'METAR', str(year), '*.txt'))
+        filepaths = glob(os.path.join('METAR', str(year), '*.txt'))
         for file in filepaths:
             station = file.split('\\')[-1].split('_')[0]
             print('{0} [{1}]'.format(station, year))
             output = is_ldzr(file)
             # print(output)
             if output is not None:
-                op = os.path.join(str(year), '{}.csv'.format(station))
+                fn = f'{station}2.csv' if station == 'CON' else f'{station}.csv'
+                op = os.path.join('LD_SD', str(year), fn)
                 output.to_csv(op, index=False, date_format='%Y-%m-%d %H:%M')
             else:
                 continue
@@ -227,6 +228,7 @@ def to_all_ld(folder):
         for file in filepaths:
             df = pd.read_csv(file)
             name = file.split('\\')[-1].split('.')[0]
+            name = 'CON' if name == 'CON2' else name
             df.loc[:, 'station'] = name
             df = df[['station', 'start_time', 'end_time', 'zr_hours', 'label']]
             dfs.append(df)
@@ -236,6 +238,10 @@ def to_all_ld(folder):
         duration = dfs['end_time'] - dfs['start_time']
         dfs['duration'] = timedelta_to_hrs(duration)
         dfs = dfs.sort_values(by='start_time')
+
+        # Need to drop duplicates because I have downloaded two files of the
+        # same data from Oct - Apr and from Nov - Mar.
+        dfs = dfs.drop_duplicates()
         fp = os.path.join(folder, f'{year}.csv')
         dfs.to_csv(fp, index=False,
                    date_format='%Y-%m-%d %H:%M')
@@ -469,7 +475,7 @@ def define_ld_events(folder):
     stations = pd.read_csv('stations.csv').set_index('station')
     all_min_zr = min_zr_stations(1979, 2022)
 
-    for file in filepaths:
+    for file in filepaths[16:17]:
         df = pd.read_csv(file)
         year = file.split('.')[0].split('\\')[-1]
         print(f'Processing year: {year}')
@@ -539,6 +545,6 @@ def num_of_events(folder):
 if __name__ == '__main__':
     # stations_to_file('stations.csv')
     # all_ld_events(1979, 2022)
-    # to_all_ld('LD_SD_all')
-    define_ld_events('Events_062022')
-    print(num_of_events('Events_062022'))
+    to_all_ld('LD_SD_all')
+    # define_ld_events('Events_062022')
+    # print(num_of_events('Events_062022'))
