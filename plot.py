@@ -18,7 +18,7 @@ from statistics import median
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from matplotlib import cm
+from matplotlib import cm, ticker
 
 import cartopy
 import cartopy.crs as ccrs
@@ -29,9 +29,11 @@ from metpy.units import units
 import scipy.ndimage as ndimage
 
 
-filepath = os.path.join('..', '..', '..', 'scratch', 'hz542', 'Icestorm')
-events_dir = os.path.join(filepath, 'Events_062022')
-reanalysis_dir = os.path.join(filepath, 'reanalysis')
+# filepath = os.path.join('..', '..', '..', 'scratch', 'hz542', 'Icestorm')
+# events_dir = os.path.join(filepath, 'Events_062022')
+# reanalysis_dir = os.path.join(filepath, 'reanalysis')
+events_dir = 'Events_062022'
+reanalysis_dir = 'reanalysis'
 
 prj = ccrs.PlateCarree()
 res = '110m'
@@ -218,7 +220,6 @@ class Plot:
     ----------
     1. Extent of the plot is important. 
     """
-
     @classmethod
     def from_csv(cls, event_csv):
         """
@@ -352,16 +353,21 @@ class Plot:
             self.ax.clabel(cs, **clabeldict)
 
     @staticmethod
-    def set_cmap(colormap, interval, maximum, minimum, category, set_over, set_under=(None, 'diverging', True, True)):
+    def set_cmap(colormap, interval, maximum, minimum=None, category='diverging', 
+                 set_over=True, set_under=True):
         """
         Set the colormap for contourf. 
         """
         over = colormap.get_over()
         under = colormap.get_under()
+        
         if minimum is None:
             minimum = -maximum
+        
         bounds = np.arange(minimum, maximum + interval, interval)
+            
         num_of_colors = len(bounds) + int(set_over) + int(set_under) - 1
+        
         if category == 'diverging':
             num_of_colors -= 2
             colors = cm.get_cmap(colormap)(np.linspace(0, 1, num_of_colors))
@@ -374,16 +380,19 @@ class Plot:
                 colors[len(colors) // 2:]])
         elif category == 'sequential':
             colors = cm.get_cmap(colormap)(np.linspace(0, 1, num_of_colors))
+            
         if set_over and list(over) == list(colors[-1]):
             over = colors[-1]
             colors = colors[:-1]
         if set_under and list(under) == list(colors[0]):
             under = colors[0]
             colors = colors[1:]
+            
         cmap = mcolors.ListedColormap(colors)
         cmap.set_over(over)
         cmap.set_under(under)
         norm = mcolors.BoundaryNorm(boundaries=bounds, ncolors=cmap.N)
+        
         return bounds, norm, cmap
 
     def contourf(self, data, colormap, interval=0.5, minimum=None, maximum=None,
@@ -404,12 +413,17 @@ class Plot:
         """
         set_under = kwargs.pop('set_under', True)
         set_over = kwargs.pop('set_over', True)
-        clevs, norm, cmap = Plot.set_cmap(colormap, interval, maximum, minimum=minimum,
-                                          category=category, set_over=set_over, set_under=set_under)
-
-        self.ax.contourf(self.lons, self.lats, data, clevs, cmap=cmap, norm=norm, **kwargs)
+        use_log = kwargs.pop('use_log', False)
         
-        return norm, cmap
+        if not use_log:
+            clevs, norm, cmap = Plot.set_cmap(colormap, interval, maximum, minimum=minimum,
+                                              category=category, set_over=set_over, set_under=set_under)
+
+            self.ax.contourf(self.lons, self.lats, data, clevs, cmap=cmap, norm=norm, **kwargs)
+            return norm, cmap
+        
+        cs = self.ax.contourf(self.lons, self.lats, data, locator=ticker.LogLocator(), cmap=colormap)
+        cbar = self.fig.colorbar(cs)
 
     def imshow(self, data, **kwargs):
         """
