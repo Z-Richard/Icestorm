@@ -547,9 +547,11 @@ def _define_events_aux(event, min_zr, yr_folder):
     start_time = event.loc[0, 'start_time']
     time_diff = timedelta_to_hrs(event['start_time'] - start_time).to_numpy()
 
-    X = np.array([event['lat'], event['lon'], time_diff]).transpose()
+    lat_mean = np.deg2rad(event['lat'].mean())
+    X = np.array([event['lat'], np.cos(lat_mean) *
+                 event['lon'], time_diff / 2.5]).transpose()
     # X = StandardScaler().fit_transform(X)
-    clf = DBSCAN(eps=2, min_samples=5).fit(X)
+    clf = DBSCAN(eps=5, min_samples=5).fit(X)
 
     print(clf.labels_)
 
@@ -599,7 +601,9 @@ def _define_events_kmeans_aux(event, time_diff, min_zr, yr_folder):
     """
     n_clusters = math.ceil(time_diff[-1] / 24)
 
-    X = np.array([event['lat'], event['lon'], time_diff]).transpose()
+    lat_mean = np.deg2rad(event['lat'].mean())
+    X = np.array([event['lat'], np.cos(lat_mean) *
+                 event['lon'], time_diff / 2.5]).transpose()
     # X = StandardScaler().fit_transform(X)
     kmeans = KMeans(n_clusters=n_clusters).fit(X)
 
@@ -694,6 +698,6 @@ if __name__ == '__main__':
     # stations_to_file('stations.csv')
     # all_ld_events(1979, 2022)
     # to_all_ld('LD_SD_all')
-    # define_events('Events_070522')
+    # define_events('Events_070522_eps=5_t=2.5_lon=mean-lat')
     # define_ld_events('Events_062022')
-    print(num_of_events('Events_070522'))
+    print(num_of_events('Events_070522_eps=5_t=2.5_lon=mean-lat'))
