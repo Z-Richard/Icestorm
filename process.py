@@ -8,6 +8,8 @@ import pandas as pd
 
 from statistics import median
 
+import math
+
 import os
 from glob import glob
 
@@ -16,7 +18,8 @@ import matplotlib.pyplot as plt
 import datetime
 
 from sklearn.neighbors import KernelDensity
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.preprocessing import StandardScaler
 from scipy.signal import argrelextrema
 from scipy.spatial.distance import cdist
 from geopy.distance import distance as geodist
@@ -294,10 +297,11 @@ def _write_event_to_file(event, min_zr, yr_folder):
         fmt) + '_' + event.iloc[-1].loc['start_time'].strftime(fmt) + '.csv'
     fp = os.path.join(yr_folder, fn)
 
-    dist_mat = _return_dist_mat(event)
-    max_dist = np.max(dist_mat)
+    # dist_mat = _return_dist_mat(event)
+    # max_dist = np.max(dist_mat)
 
-    if max_dist / len(event) < MIN_EVENT_DISTANCE and len(event) >= min_zr:
+    # if max_dist / len(event) < MIN_EVENT_DISTANCE and len(event) >= min_zr:
+    if len(event) >= min_zr:
         event.to_csv(fp, index=False, date_format='%Y-%m-%d %H:%M')
 
 
@@ -403,7 +407,7 @@ def _kmeans_event(event, time_diff, min_zr, yr_folder):
         _write_event_to_file(se, min_zr, yr_folder)
 
 
-def _define_event(event, min_zr, yr_folder):
+def _define_ld_aux(event, min_zr, yr_folder):
     """
     Utility function to define an individual LD event. 
 
@@ -465,6 +469,150 @@ def _define_event(event, min_zr, yr_folder):
         _kmeans_event(event, time_diff, min_zr, yr_folder)
 
 
+def define_events(folder):
+    """
+    Define all types of freezing rain events from 1979 to 2022 by segmenting
+    the files in LD_SD_all folder into time-based portions (stations whose start
+    time are at least separated by 24 hours). These sub-segments are then
+    clustered into appropriate events by DBSCAN and Kernel Density Estimation
+    such that each event does not span more than 24 hours (and also have
+    a well-defined cluster center). 
+
+    Parameter
+    ---------
+    folder
+        - the folder to write the DataFrames into
+
+    Returns
+    -------
+    None
+    """
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    filepaths = glob(os.path.join('LD_SD_all', '*.csv'))
+    stations = pd.read_csv('stations.csv').set_index('station')
+    all_min_zr = min_zr_stations(1979, 2022)
+
+    # Can specify a year by only subsetting filepaths here
+    for file in filepaths:
+        df = pd.read_csv(file)
+        year = file.split('.')[0].split('\\')[-1]
+        print(f'Processing year: {year}')
+        yr_folder = os.path.join(folder, year)
+        if not os.path.isdir(yr_folder):
+            os.makedirs(yr_folder)
+        min_zr = all_min_zr[int(year)]
+        df = df.drop(columns=['end_time'])
+        df['start_time'] = pd.to_datetime(df['start_time'])
+        df = df.merge(stations, how='left',
+                      left_on='station', right_index=True)
+        df.reset_index(drop=True, inplace=True)
+        si, ei = [], []
+        indices = df.index.tolist()
+        for i, ind in enumerate(indices[:-1]):
+            end = df.loc[ind, 'start_time']
+            start = df.loc[indices[i+1], 'start_time']
+            if start - end >= datetime.timedelta(hours=24):
+                si.append(indices[i+1])
+                ei.append(ind)
+
+        si = [indices[0]] + si
+        ei = ei + [indices[-1]]
+        for s, e in list(zip(si, ei)):
+            event = df.loc[s:e, :].copy()
+            print('event\n', event)
+            _define_events_aux(event, min_zr, yr_folder)
+
+
+def _define_events_aux(event, min_zr, yr_folder):
+    """
+    An auxillary function for defining all events. 
+
+    Parameters
+    ----------
+    min_zr : int
+        The minimum number of freezing rain events required for a specified
+        year
+
+    yr_folder: str
+        The folder to write the file to
+
+    Returns
+    -------
+    None
+    """
+    event = event.dropna().reset_index(drop=True)
+    if len(event) == 0:
+        return
+    start_time = event.loc[0, 'start_time']
+    time_diff = timedelta_to_hrs(event['start_time'] - start_time).to_numpy()
+
+    X = np.array([event['lat'], event['lon'], time_diff]).transpose()
+    # X = StandardScaler().fit_transform(X)
+    clf = DBSCAN(eps=2, min_samples=5).fit(X)
+
+    print(clf.labels_)
+
+    for label in range(clf.labels_.max() + 1):
+        subset_mask = clf.labels_ == label
+        sub_event = event.loc[subset_mask, :].copy().reset_index(drop=True)
+
+        sub_start_time = sub_event.loc[0, 'start_time']
+        sub_end_time = sub_event.loc[len(sub_event) - 1, 'start_time']
+        sub_timespan = timedelta_to_hrs(
+            sub_end_time - sub_start_time, process_series=False)
+
+        if sub_timespan > 24:
+            sub_time_diff = timedelta_to_hrs(
+                sub_event['start_time'] - sub_start_time)
+            _define_events_kmeans_aux(sub_event, sub_time_diff.to_numpy(),
+                                      min_zr, yr_folder)
+        else:
+            _write_event_to_file(sub_event, min_zr, yr_folder)
+
+
+def _define_events_kmeans_aux(event, time_diff, min_zr, yr_folder):
+    """
+    Use K-means to break an event into several segments.
+    Unlike _kmeans_events, this method sets the number of clusters
+    dynamically by looking at the timespan of the event (the difference
+    between the start time of the first point and the last point).
+
+    It also does not attempt to further break down the clusters by calling
+    _kde_events. 
+
+    Parameters
+    ----------
+    event : pd.DataFrame
+        The actual event
+
+    time_diff : numpy.ndarray
+        An array that specifies the time difference between the starting time 
+        of all data points of an event and the first data point
+
+    min_zr : int
+        The minimum number of freezing rain events required for a specified
+        year
+
+    yr_folder: str
+        The folder to write the file to
+    """
+    n_clusters = math.ceil(time_diff[-1] / 24)
+
+    X = np.array([event['lat'], event['lon'], time_diff]).transpose()
+    # X = StandardScaler().fit_transform(X)
+    kmeans = KMeans(n_clusters=n_clusters).fit(X)
+
+    # Iterate through each possible cluster
+    for label in range(n_clusters):
+        subset_mask = kmeans.labels_ == label
+
+        # Note here that the sub_event should be sorted by time already
+        sub_event = event.loc[subset_mask, :].copy().reset_index(drop=True)
+
+        _write_event_to_file(sub_event, min_zr, yr_folder)
+
+
 def define_ld_events(folder):
     """
     Define the long-duration ZR events from 1979 to 2022.
@@ -504,7 +652,7 @@ def define_ld_events(folder):
         for s, e in list(zip(si, ei)):
             event = df_ld.loc[s:e, :].copy()
             print('event\n', event)
-            _define_event(event, min_zr, yr_folder)
+            _define_ld_aux(event, min_zr, yr_folder)
 
 
 def plot_stations_by_year(start_yr, end_yr):
@@ -545,6 +693,7 @@ def num_of_events(folder):
 if __name__ == '__main__':
     # stations_to_file('stations.csv')
     # all_ld_events(1979, 2022)
-    to_all_ld('LD_SD_all')
+    # to_all_ld('LD_SD_all')
+    # define_events('Events_070522')
     # define_ld_events('Events_062022')
-    # print(num_of_events('Events_062022'))
+    print(num_of_events('Events_070522'))
