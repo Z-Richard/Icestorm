@@ -32,6 +32,7 @@ import scipy.ndimage as ndimage
 # filepath = os.path.join('..', '..', '..', 'scratch', 'hz542', 'Icestorm')
 # events_dir = os.path.join(filepath, 'Events_062022')
 # reanalysis_dir = os.path.join(filepath, 'reanalysis')
+# events_dir = 'Events_070522_eps=5_t=2.5_lon=mean-lat'
 events_dir = 'Events_062022'
 reanalysis_dir = 'reanalysis'
 
@@ -73,6 +74,27 @@ def timedelta_to_hrs(td, process_series=True):
                         td.dt.components.days * 24, 2)
     return np.round(td.components.hours + td.components.minutes / 60 +
                     td.components.days * 24, 2)
+
+
+def retrieve_files(time):
+    """
+    Utility function to retrieve all useful netcdf4 files at a given time. 
+    """
+    month = f'{time.month:02d}'
+    # The variable yr is only used to index into the year folder
+    yr = time.year if time.month in [11, 12] else time.year - 1
+    yr_folder = os.path.join(reanalysis_dir, str(yr))
+
+    pres_file = os.path.join(yr_folder, f'e5_{time.year}{month}_pl.nc')
+    pres_temp_file = os.path.join(
+        yr_folder, f'e5_{time.year}{month}_pl_temperature.nc')
+    sfc_file = os.path.join(yr_folder, f'e5_{time.year}{month}_sfc.nc')
+
+    pres_data = xr.open_dataset(pres_file)
+    pres_temp_data = xr.open_dataset(pres_temp_file)
+    sfc_data = xr.open_dataset(sfc_file)
+
+    return pres_data, pres_temp_data, sfc_data
 
 
 def find_event_median_time(event):
@@ -188,7 +210,7 @@ def plot_events_by_year(year):
         plot_event(fp)
 
 
-def find_all_events_by_year(year):
+def find_all_events_by_year(events_dir, year):
     """
     Returns all events in a year. 
     """
@@ -253,7 +275,7 @@ class Plot:
 
         # Overlay the stations on top of the chart by setting zorder to a large number
         if df is not None:
-            self.ax.scatter(df.loc[:, 'lon'], df.loc[:, 'lat'], s=20,
+            _ = self.ax.scatter(df.loc[:, 'lon'], df.loc[:, 'lat'], s=20,
                             transform=prj, c='k', zorder=10, alpha=0.5)
             
     def cla(self):
